@@ -1,7 +1,7 @@
 ---
 skill: ais_positions
 source_type: parquet
-source_path: data/seed/**/*.parquet
+source_path: data/seed/ais_sample.parquet
 
 interactions:
   - multi_select

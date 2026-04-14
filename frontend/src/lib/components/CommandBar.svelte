@@ -8,6 +8,82 @@
   let lastError = $state<string | null>(null);
   let backendOnline = $state<boolean | null>(null);
 
+  // Voice state
+  let isListening = $state(false);
+  let voiceSupported = $state(false);
+  let ttsEnabled = $state(true);
+  let recognition: any = null;
+
+  // Check browser support for Web Speech API
+  $effect(() => {
+    const SpeechRecognition = (globalThis as any).SpeechRecognition || (globalThis as any).webkitSpeechRecognition;
+    voiceSupported = !!SpeechRecognition;
+    if (SpeechRecognition) {
+      recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onresult = (event: any) => {
+        const transcript = Array.from(event.results)
+          .map((r: any) => r[0].transcript)
+          .join('');
+        inputValue = transcript;
+
+        // If final result, auto-submit
+        const lastResult = event.results[event.results.length - 1];
+        if (lastResult.isFinal) {
+          isListening = false;
+          // Small delay to let user see transcript before submitting
+          setTimeout(() => handleSubmit(), 200);
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        console.warn('Speech recognition error:', event.error);
+        isListening = false;
+        if (event.error === 'not-allowed') {
+          lastError = 'Microphone access denied. Check browser permissions.';
+        }
+      };
+
+      recognition.onend = () => {
+        isListening = false;
+      };
+    }
+  });
+
+  function toggleVoice() {
+    if (!recognition) return;
+    if (isListening) {
+      recognition.stop();
+      isListening = false;
+    } else {
+      lastError = null;
+      inputValue = '';
+      recognition.start();
+      isListening = true;
+    }
+  }
+
+  /** Speak text using browser TTS */
+  function speak(text: string) {
+    if (!ttsEnabled || !('speechSynthesis' in globalThis)) return;
+    // Cancel any ongoing speech
+    speechSynthesis.cancel();
+    // Clean up markdown formatting for speech
+    const clean = text
+      .replace(/\*\*/g, '')
+      .replace(/\*/g, '')
+      .replace(/#{1,6}\s/g, '')
+      .replace(/- /g, ', ')
+      .replace(/\n+/g, '. ');
+    const utterance = new SpeechSynthesisUtterance(clean);
+    utterance.rate = 1.05;
+    utterance.pitch = 1.0;
+    speechSynthesis.speak(utterance);
+  }
+
   // Check backend health on mount
   $effect(() => {
     checkHealth().then(h => {
@@ -76,6 +152,10 @@
         // Send to agent — returns full envelope
         const envelope = await sendAgentMessage(query);
         setAgentResult(envelope);
+        // Speak the summary if TTS is enabled
+        if (envelope.summary) {
+          speak(envelope.summary);
+        }
       }
     } catch (err: unknown) {
       lastError = err instanceof Error ? err.message : String(err);
@@ -87,6 +167,10 @@
   function dismiss() {
     clearAgentResult();
     lastError = null;
+    // Stop any ongoing speech
+    if ('speechSynthesis' in globalThis) {
+      speechSynthesis.cancel();
+    }
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -120,15 +204,36 @@
       type="text"
       bind:value={inputValue}
       onkeydown={handleKeydown}
-      placeholder={backendOnline === false
-        ? 'Backend offline — start backend on :3001'
-        : 'SQL query or natural language...'}
+      placeholder={isListening
+        ? 'Listening...'
+        : backendOnline === false
+          ? 'Backend offline — start backend on :3001'
+          : 'SQL query or natural language...'}
       class="command-input"
+      class:listening={isListening}
       disabled={isLoading}
     />
     {#if isLoading}
       <span class="loading-indicator">...</span>
     {:else}
+      {#if voiceSupported}
+        <button
+          class="voice-btn"
+          class:active={isListening}
+          onclick={toggleVoice}
+          title={isListening ? 'Stop listening' : 'Voice input'}
+        >
+          {isListening ? '⏹' : '🎤'}
+        </button>
+      {/if}
+      <button
+        class="tts-btn"
+        class:active={ttsEnabled}
+        onclick={() => { ttsEnabled = !ttsEnabled; if (!ttsEnabled && 'speechSynthesis' in globalThis) speechSynthesis.cancel(); }}
+        title={ttsEnabled ? 'TTS on — click to mute' : 'TTS off — click to enable'}
+      >
+        {ttsEnabled ? '🔊' : '🔇'}
+      </button>
       <button class="send-btn" onclick={handleSubmit} disabled={!inputValue.trim()}>
         Send
       </button>
@@ -232,8 +337,40 @@
     color: #555;
   }
 
+  .command-input.listening::placeholder {
+    color: #FFD700;
+    animation: pulse 1s infinite;
+  }
+
   .command-input:disabled {
     opacity: 0.6;
+  }
+
+  .voice-btn, .tts-btn {
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 14px;
+    cursor: pointer;
+    opacity: 0.6;
+    transition: opacity 0.15s, background 0.15s;
+  }
+
+  .voice-btn:hover, .tts-btn:hover {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .voice-btn.active {
+    opacity: 1;
+    background: rgba(255, 50, 50, 0.2);
+    border-color: rgba(255, 50, 50, 0.5);
+    animation: pulse 1s infinite;
+  }
+
+  .tts-btn.active {
+    opacity: 0.8;
   }
 
   .send-btn {

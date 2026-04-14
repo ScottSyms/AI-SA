@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use crate::db::Database;
+use crate::db::{safe_query, Database};
 use crate::llm::{
     ChatRequestBuilder, FunctionDef, LlmClient, Message, ToolCall, ToolDef,
 };
@@ -431,7 +431,7 @@ async fn execute_tool_call(
     // Handle built-in run_sql tool
     if tc.function.name == "run_sql" {
         let sql = args.get("sql").and_then(|v| v.as_str()).unwrap_or("");
-        return match db.query(sql) {
+        return match safe_query(db, sql) {
             Ok(result) => result.to_string(),
             Err(e) => json!({"error": e}).to_string(),
         };

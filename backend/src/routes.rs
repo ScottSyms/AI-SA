@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 use crate::agent::{AgentRequest, RenderEnvelope};
+use crate::db::validate_sql;
 use crate::state::AppState;
 
 // ── Health ──────────────────────────────────────────────────────────────────
@@ -123,24 +124,10 @@ pub async fn execute_query(
 
     // Path 2: raw SQL (validated for safety)
     if let Some(sql) = &req.sql {
-        let sql_upper = sql.trim().to_uppercase();
-
-        // Basic safety: reject writes
-        let forbidden = ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "TRUNCATE", "COPY"];
-        for keyword in &forbidden {
-            if sql_upper.starts_with(keyword) {
-                return Err((
-                    StatusCode::FORBIDDEN,
-                    Json(json!({ "status": "error", "error": "write operations are not allowed" })),
-                ));
-            }
-        }
-
-        // Ensure LIMIT is present
-        if !sql_upper.contains("LIMIT") {
+        if let Err(reason) = validate_sql(sql) {
             return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "status": "error", "error": "query must contain a LIMIT clause" })),
+                StatusCode::FORBIDDEN,
+                Json(json!({ "status": "error", "error": reason })),
             ));
         }
 
