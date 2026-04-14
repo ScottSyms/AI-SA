@@ -23,6 +23,7 @@
   } from '$lib/platform/duckdb/client';
   import type { Vessel, SelectionItem } from '$lib/platform/types';
   import { agentResultStore, agentShouldShowMap } from '$lib/platform/render/store';
+  import { fetchSkills, fetchSkillLayerData, type BackendSkill } from '$lib/platform/api/client';
 
   let mapContainer: HTMLDivElement;
   let map: maplibregl.Map;
@@ -504,8 +505,97 @@
 
       // Initialize DuckDB after map loads
       initDuckDB(vessels);
+
+      // Dynamically load skill layers from backend
+      loadSkillLayers(map);
     });
   });
+
+  /** Fetch skills from backend and register their data as map layers. */
+  async function loadSkillLayers(mapInstance: maplibregl.Map) {
+    try {
+      const skills = await fetchSkills();
+      for (const skill of skills) {
+        if (!skill.map_layers || skill.map_layers.length === 0) continue;
+
+        // Skip ais_positions — already rendered client-side from synthetic data
+        if (skill.name === 'ais_positions') continue;
+
+        const layerData = await fetchSkillLayerData(skill.name);
+        if (!layerData || layerData.feature_count === 0) continue;
+
+        const sourceId = `skill-${skill.name}`;
+        mapInstance.addSource(sourceId, {
+          type: 'geojson',
+          data: layerData.geojson,
+        });
+
+        // Register each declared map layer
+        for (const layerDef of skill.map_layers) {
+          const layerId = `skill-${skill.name}-${layerDef.id}`;
+
+          if (layerDef.type === 'circle') {
+            mapInstance.addLayer({
+              id: layerId,
+              type: 'circle',
+              source: sourceId,
+              paint: {
+                'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 4, 8, 7, 12, 11],
+                'circle-color': '#FF6B35',
+                'circle-stroke-color': '#ffffff',
+                'circle-stroke-width': 1.5,
+                'circle-opacity': 0.9,
+              },
+            });
+          } else if (layerDef.type === 'symbol') {
+            mapInstance.addLayer({
+              id: layerId,
+              type: 'symbol',
+              source: sourceId,
+              layout: {
+                'text-field': ['get', 'port_name'],
+                'text-size': 11,
+                'text-offset': [0, 1.5],
+                'text-anchor': 'top',
+                'text-optional': true,
+              },
+              paint: {
+                'text-color': '#333333',
+                'text-halo-color': '#ffffff',
+                'text-halo-width': 1.5,
+              },
+              minzoom: 6,
+            });
+          } else if (layerDef.type === 'line') {
+            mapInstance.addLayer({
+              id: layerId,
+              type: 'line',
+              source: sourceId,
+              paint: {
+                'line-color': '#FF6B35',
+                'line-width': 2,
+                'line-opacity': 0.8,
+              },
+            });
+          } else if (layerDef.type === 'fill') {
+            mapInstance.addLayer({
+              id: layerId,
+              type: 'fill',
+              source: sourceId,
+              paint: {
+                'fill-color': '#FF6B35',
+                'fill-opacity': 0.15,
+              },
+            });
+          }
+        }
+
+        console.log(`[Map] Loaded skill layer: ${skill.name} (${layerData.feature_count} features)`);
+      }
+    } catch (err) {
+      console.warn('[Map] Failed to load skill layers (backend may be offline):', err);
+    }
+  }
 
   // Subscribe to draw mode changes
   const unsubDrawMode = drawModeStore.subscribe((mode) => {

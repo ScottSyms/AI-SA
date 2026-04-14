@@ -117,3 +117,19 @@ export interface AgentRenderEnvelope {
   actions: unknown[];
   warnings: string[];
 }
+
+/** Fetch GeoJSON layer data for a specific skill. */
+export async function fetchSkillLayerData(skillName: string): Promise<{
+  geojson: GeoJSON.FeatureCollection;
+  feature_count: number;
+} | null> {
+  try {
+    const res = await fetch(`${API_BASE}/skills/${encodeURIComponent(skillName)}/layer-data`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.status !== 'ok') return null;
+    return { geojson: data.geojson, feature_count: data.feature_count };
+  } catch {
+    return null;
+  }
+}

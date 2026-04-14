@@ -134,6 +134,70 @@ impl Database {
         })
     }
 
+    /// Describe all tables and views in the database, returning a formatted string
+    /// suitable for inclusion in an LLM system prompt.
+    pub fn describe_schema(&self) -> String {
+        let conn = self.conn.lock().unwrap();
+        let mut schema = String::new();
+
+        // Query all tables
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_type = 'BASE TABLE' ORDER BY table_name"
+        ) {
+            if let Ok(mut rows) = stmt.query([]) {
+                while let Ok(Some(row)) = rows.next() {
+                    if let Ok(table_name) = row.get::<_, String>(0) {
+                        schema.push_str(&format!("Table: {} (columns: ", table_name));
+                        if let Ok(cols) = self.get_column_info(&conn, &table_name) {
+                            schema.push_str(&cols);
+                        }
+                        schema.push_str(")\n");
+                    }
+                }
+            }
+        }
+
+        // Query all views
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_type = 'VIEW' ORDER BY table_name"
+        ) {
+            if let Ok(mut rows) = stmt.query([]) {
+                while let Ok(Some(row)) = rows.next() {
+                    if let Ok(view_name) = row.get::<_, String>(0) {
+                        schema.push_str(&format!("View: {} (columns: ", view_name));
+                        if let Ok(cols) = self.get_column_info(&conn, &view_name) {
+                            schema.push_str(&cols);
+                        }
+                        schema.push_str(")\n");
+                    }
+                }
+            }
+        }
+
+        if schema.is_empty() {
+            schema.push_str("(no tables or views loaded)");
+        }
+
+        schema
+    }
+
+    /// Get column names and types for a table or view.
+    fn get_column_info(&self, conn: &Connection, table_name: &str) -> Result<String, String> {
+        let sql = format!(
+            "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = '{}' AND table_schema = 'main' ORDER BY ordinal_position",
+            table_name.replace('\'', "''")
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|e| format!("{e}"))?;
+        let mut rows = stmt.query([]).map_err(|e| format!("{e}"))?;
+        let mut cols = Vec::new();
+        while let Ok(Some(row)) = rows.next() {
+            let name: String = row.get(0).unwrap_or_default();
+            let dtype: String = row.get(1).unwrap_or_default();
+            cols.push(format!("{} {}", name, dtype));
+        }
+        Ok(cols.join(", "))
+    }
+
     /// Load parquet files matching a glob pattern into a table.
     pub fn load_parquet(&self, table_name: &str, glob_pattern: &str) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();

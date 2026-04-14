@@ -62,6 +62,7 @@ async fn main() {
     let app = Router::new()
         .route("/api/health", get(routes::health))
         .route("/api/skills", get(routes::list_skills))
+        .route("/api/skills/{name}/layer-data", get(routes::skill_layer_data))
         .route("/api/query", post(routes::execute_query))
         .route("/api/agent", post(routes::agent_handler))
         .layer(CorsLayer::permissive())

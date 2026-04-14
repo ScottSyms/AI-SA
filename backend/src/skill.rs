@@ -52,6 +52,7 @@ pub struct SkillManifest {
     pub sql_views: String,
     /// Directory containing SQL files for this skill
     #[serde(skip)]
+    #[allow(dead_code)]
     pub sql_dir: PathBuf,
     /// All SQL files keyed by filename (without extension)
     pub sql_files: HashMap<String, String>,

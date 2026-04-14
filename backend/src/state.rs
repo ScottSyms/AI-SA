@@ -8,6 +8,7 @@ use crate::skill::SkillManifest;
 
 /// Shared application state passed to all route handlers.
 pub struct AppState {
+    #[allow(dead_code)]
     pub config: Config,
     pub db: Database,
     pub skills: Vec<SkillManifest>,

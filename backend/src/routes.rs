@@ -1,5 +1,5 @@
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::StatusCode,
     Json,
 };
@@ -7,7 +7,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use crate::agent::{AgentRequest, RenderEnvelope};
+use crate::agent::AgentRequest;
 use crate::db::validate_sql;
 use crate::state::AppState;
 
@@ -176,4 +176,102 @@ pub async fn agent_handler(
             "error": format!("serialization error: {e}")
         })
     }))
+}
+
+// ── GET /api/skills/:name/layer-data ───────────────────────────────────────
+
+/// Returns GeoJSON FeatureCollection for a skill's data, suitable for map layers.
+/// Queries the first available view (or table) with lat/lon columns.
+pub async fn skill_layer_data(
+    State(state): State<Arc<AppState>>,
+    Path(skill_name): Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let skill = state
+        .skills
+        .iter()
+        .find(|s| s.name == skill_name)
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "status": "error", "error": format!("skill '{}' not found", skill_name) })),
+            )
+        })?;
+
+    // Try to query a view that returns spatial data (with lat/lon).
+    // Priority: first view defined in sql_views section, then the raw table.
+    let query_candidates: Vec<String> = {
+        let mut candidates = Vec::new();
+        // Extract view names from the sql_views content
+        for line in skill.sql_views.lines() {
+            let upper = line.trim().to_uppercase();
+            if upper.starts_with("CREATE") && upper.contains("VIEW") {
+                // Extract view name: CREATE OR REPLACE VIEW <name> AS ...
+                if let Some(as_pos) = upper.find(" AS") {
+                    let before_as = &line.trim()[..as_pos];
+                    if let Some(view_name) = before_as.split_whitespace().last() {
+                        candidates.push(format!("SELECT * FROM {} LIMIT 500", view_name));
+                    }
+                }
+            }
+        }
+        // Fallback: query the raw table
+        candidates.push(format!("SELECT * FROM {} LIMIT 500", skill.name));
+        candidates
+    };
+
+    // Try each candidate until one returns data with lat/lon
+    for sql in &query_candidates {
+        match state.db.query(sql) {
+            Ok(result) => {
+                let columns = result
+                    .get("columns")
+                    .and_then(|c| c.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+                    .unwrap_or_default();
+
+                let has_lat = columns.iter().any(|c| *c == "lat" || *c == "latitude");
+                let has_lon = columns.iter().any(|c| *c == "lon" || *c == "longitude" || *c == "lng");
+
+                if has_lat && has_lon {
+                    // Convert to GeoJSON
+                    let rows = result.get("rows").and_then(|r| r.as_array());
+                    if let Some(rows) = rows {
+                        let features: Vec<Value> = rows
+                            .iter()
+                            .filter_map(|row| {
+                                let lat = row.get("lat").or_else(|| row.get("latitude"))
+                                    .and_then(|v| v.as_f64())?;
+                                let lon = row.get("lon").or_else(|| row.get("longitude")).or_else(|| row.get("lng"))
+                                    .and_then(|v| v.as_f64())?;
+                                Some(json!({
+                                    "type": "Feature",
+                                    "geometry": {
+                                        "type": "Point",
+                                        "coordinates": [lon, lat]
+                                    },
+                                    "properties": row
+                                }))
+                            })
+                            .collect();
+
+                        return Ok(Json(json!({
+                            "status": "ok",
+                            "skill": skill_name,
+                            "geojson": {
+                                "type": "FeatureCollection",
+                                "features": features
+                            },
+                            "feature_count": features.len()
+                        })));
+                    }
+                }
+            }
+            Err(_) => continue,
+        }
+    }
+
+    Err((
+        StatusCode::NOT_FOUND,
+        Json(json!({ "status": "error", "error": "no spatial data found for skill" })),
+    ))
 }

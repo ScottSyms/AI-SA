@@ -16,9 +16,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 use crate::db::{safe_query, Database};
-use crate::llm::{
-    ChatRequestBuilder, FunctionDef, LlmClient, Message, ToolCall, ToolDef,
-};
+use crate::llm::{FunctionDef, LlmClient, Message, ToolCall, ToolDef};
 use crate::skill::{SkillManifest, SkillTool};
 
 /// Maximum tool-calling iterations to prevent runaway loops.
@@ -135,29 +133,34 @@ impl Agent {
         skills: &[SkillManifest],
         db: &Database,
     ) -> RenderEnvelope {
-        // Build system prompt from loaded skills
-        let system_prompt = build_system_prompt(skills, req.context.as_ref());
+        // Build dynamic schema description from DuckDB metadata
+        let db_schema = db.describe_schema();
+
+        // Build system prompt from loaded skills + live schema
+        let system_prompt = build_system_prompt(skills, req.context.as_ref(), &db_schema);
 
         // Convert skill tools to OpenAI function-calling format
         let tools = build_tool_defs(skills);
 
-        // Add a built-in SQL query tool for ad hoc queries
+        // Add a built-in SQL query tool for ad hoc queries with dynamic schema
+        let run_sql_desc = format!(
+            "Execute a read-only SQL query against the DuckDB database. \
+             The query MUST include a LIMIT clause. \
+             \n\nDATABASE SCHEMA:\n{}\
+             \nIMPORTANT: There are NO spatial extensions (no ST_Distance, no PostGIS). \
+             For distance calculations, use the Euclidean approximation: \
+             ORDER BY pow(lat - $target_lat, 2) + pow(lon - $target_lon, 2) ASC. \
+             For accurate distance in km, use: \
+             6371 * acos(cos(radians($lat1)) * cos(radians(lat)) * cos(radians(lon) - radians($lon1)) + sin(radians($lat1)) * sin(radians(lat))) as distance_km",
+            db_schema
+        );
+
         let mut all_tools = tools;
         all_tools.push(ToolDef {
             tool_type: "function".into(),
             function: FunctionDef {
                 name: "run_sql".into(),
-                description: concat!(
-                    "Execute a read-only SQL query against the DuckDB database. ",
-                    "The query MUST include a LIMIT clause. ",
-                    "Available tables: ais_positions (columns: mmsi BIGINT, name VARCHAR, lat DOUBLE, lon DOUBLE, speed DOUBLE, heading INTEGER, vessel_type VARCHAR, timestamp BIGINT). ",
-                    "Available views: v_latest_positions (one row per vessel, latest timestamp), v_vessel_tracks, v_vessel_summary. ",
-                    "IMPORTANT: There are NO spatial extensions (no ST_Distance, no PostGIS). ",
-                    "For distance calculations, use the Euclidean approximation: ",
-                    "ORDER BY pow(lat - $target_lat, 2) + pow(lon - $target_lon, 2) ASC. ",
-                    "For accurate distance in km, use: ",
-                    "6371 * acos(cos(radians($lat1)) * cos(radians(lat)) * cos(radians(lon) - radians($lon1)) + sin(radians($lat1)) * sin(radians(lat))) as distance_km"
-                ).into(),
+                description: run_sql_desc,
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -283,18 +286,20 @@ impl Agent {
 
 // ── System prompt builder ──────────────────────────────────────────────────
 
-fn build_system_prompt(skills: &[SkillManifest], context: Option<&AgentContext>) -> String {
-    let mut prompt = String::from(
+fn build_system_prompt(skills: &[SkillManifest], context: Option<&AgentContext>, db_schema: &str) -> String {
+    let mut prompt = format!(
         "You are a geospatial intelligence agent. You help users explore and analyze spatial data.\n\n\
          RULES:\n\
          - Use the provided tools to answer questions. Do NOT guess data.\n\
          - When querying data, always use LIMIT to bound results.\n\
          - Present results clearly with relevant details.\n\
          - If the user asks about selected vessels, use the context provided.\n\
-         - Use nautical terminology where appropriate.\n\
+         - Use nautical terminology where appropriate for maritime data.\n\
          - If you need to run a custom query, use the run_sql tool.\n\
          - NEVER call the same tool more than twice with the same intent. If a query fails, try a different approach or report what you know.\n\
          - Prefer FEWER tool calls. One well-crafted query is better than many exploratory ones.\n\n\
+         DATABASE SCHEMA:\n\
+         {db_schema}\n\
          DATABASE CONSTRAINTS:\n\
          - DuckDB with NO spatial extensions (no ST_Distance, no ST_Point, no PostGIS functions).\n\
          - For distance/proximity queries, use Euclidean approximation or haversine:\n\
@@ -311,7 +316,8 @@ fn build_system_prompt(skills: &[SkillManifest], context: Option<&AgentContext>)
          -- Vessel types: SELECT vessel_type, COUNT(*) as count FROM v_latest_positions GROUP BY vessel_type ORDER BY count DESC LIMIT 20\n\
          -- Fastest vessels: SELECT name, mmsi, speed, lat, lon, vessel_type FROM v_latest_positions ORDER BY speed DESC LIMIT 5\n\
          -- Nearest to a point: SELECT name, mmsi, lat, lon, speed, vessel_type, pow(lat - 51.5, 2) + pow(lon - (-0.1), 2) as dist_sq FROM v_latest_positions ORDER BY dist_sq ASC LIMIT 5\n\
-         -- Vessels in area: SELECT name, mmsi, lat, lon FROM v_latest_positions WHERE lat BETWEEN 50.0 AND 52.0 AND lon BETWEEN -1.0 AND 1.0 LIMIT 50\n\n"
+         -- Search ports: SELECT port_name, country, lat, lon, size FROM v_all_ports WHERE port_name ILIKE '%rotterdam%' LIMIT 10\n\
+         -- Ports near vessels: SELECT p.port_name, p.country, p.lat, p.lon, p.size FROM v_all_ports p ORDER BY pow(p.lat - 51.5, 2) + pow(p.lon - (-0.1), 2) ASC LIMIT 5\n\n"
     );
 
     // Inject each skill's domain prompt

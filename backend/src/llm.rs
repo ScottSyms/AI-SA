@@ -54,6 +54,7 @@ impl Message {
         }
     }
 
+    #[allow(dead_code)]
     pub fn assistant_text(content: &str) -> Self {
         Message {
             role: "assistant".into(),
@@ -110,11 +111,13 @@ pub struct ChatResponse {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Choice {
     pub message: ChoiceMessage,
+    #[allow(dead_code)]
     pub finish_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ChoiceMessage {
+    #[allow(dead_code)]
     pub role: String,
     pub content: Option<String>,
     pub tool_calls: Option<Vec<ToolCall>>,
@@ -215,6 +218,7 @@ impl ChatRequestBuilder {
         self
     }
 
+    #[allow(dead_code)]
     pub fn tool_choice(mut self, choice: Value) -> Self {
         self.tool_choice = Some(choice);
         self

@@ -8,6 +8,7 @@ pub struct Config {
     /// Path to skills/ directory
     pub skills_dir: PathBuf,
     /// Path to data/ directory
+    #[allow(dead_code)]
     pub data_dir: PathBuf,
     /// Server bind address
     pub bind_addr: String,
