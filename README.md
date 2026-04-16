@@ -210,7 +210,9 @@ tommy3/
 │       └── bin/           # seed-data, seed-ports generators
 ├── skills/                # Drop-in skill directories
 │   ├── ais_positions/     # Reference AIS skill
-│   └── world_ports/       # World ports skill
+│   ├── world_ports/       # World ports skill
+│   └── speech_output/     # Speech/narration guidance skill
+├── voices/                # Local voice model experiments/assets
 └── data/seed/             # Generated parquet files
 ```
 
@@ -222,7 +224,7 @@ tommy3/
 | 2 | DuckDB-WASM, polygon/radius draw tools, spatial queries, table view | Done |
 | 3 | Rust backend, skill loader, server DuckDB, API endpoints, vite proxy | Done |
 | 4 | Agent runtime, LLM integration, command bar wiring, render pipeline | Done |
-| 5 | Server-side voice (Whisper/Piper), ad hoc SQL hardening, extensibility proof | Not started |
+| 5 | Browser voice input, OpenAI TTS with browser fallback, ad hoc SQL hardening, extensibility proof | In progress |
 
 ## License
 

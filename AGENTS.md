@@ -418,13 +418,14 @@ Project Structure
 tommy3/
 ├── frontend/          # SvelteKit app (port 5174, proxies /api/* → backend)
 │   └── src/lib/
-│       ├── platform/  # types, api client, stores (map, selection, duckdb, render)
-│       ├── components/ # Map, DetailPanel, CommandBar, TableView, Toolbar
+│       ├── platform/  # types, api client, stores (map, selection, duckdb, render, conversation, assistant)
+│       ├── components/ # Map, CommandBar, TableView, Sidebar
 │       └── data/       # synthetic AIS generator
 ├── backend/           # Rust Axum server (port 3001)
-│   └── src/           # main, config, db, skill, routes, state, llm, agent
+│   └── src/           # main, config, db, skill, routes, state, llm, agent, speech, tts
 ├── skills/            # Drop-in skill directories
-│   └── ais_positions/ # Reference skill with skill.md + sql/*.sql
+│   ├── ais_positions/ # Reference skill with skill.md + sql/*.sql
+│   └── speech_output/ # Narration/pronunciation guidance skill (no dataset)
 └── data/seed/         # Generated parquet files
 ```
 
@@ -452,10 +453,24 @@ Agent Runtime
 Frontend Rendering Pipeline
 
 - Agent results flow through `agentResultStore` (Svelte 5 runes)
-- CommandBar dispatches to the store; Map, TableView, and DetailPanel subscribe
-- TableView is dual-source: shows agent result data OR selection data, with dynamic column detection
+- Assistant UI behavior is centralized in `platform/assistant/store.ts`; Sidebar and CommandBar both subscribe to the same input, voice, status, and submission state
+- Conversation history is session-scoped in `platform/conversation/store.ts` and is passed back to the backend agent as request context
+- CommandBar dispatches to the store; Map, TableView, and Sidebar subscribe
+- TableView is a unified lower-pane results surface: it shows agent result data, multi-selection tables, or single-vessel detail depending on context
 - Map has an `agent-overlay` GeoJSON source with circle/line/fill layers; auto-fits bounds to results
+- The primary workspace is vertically split: MapLibre map in the top pane, structured output in the bottom pane, with Sidebar fixed on the left
+- Single-vessel details no longer appear as a floating popup over the map; they render in the lower pane instead
 - All outputs conform to the RenderEnvelope contract from §4
+
+Speech Input and Output
+
+- Voice input currently uses the browser Web Speech API (`SpeechRecognition` / `webkitSpeechRecognition`) rather than Whisper
+- Spoken output uses the OpenAI TTS API in the backend, with browser `speechSynthesis` fallback in the frontend if the API request fails
+- The `speech_output` skill injects narration and pronunciation guidance into the agent prompt
+- A platform-owned speech formatting pipeline normalizes spoken text before TTS on both the backend and frontend fallback path
+- MMSI values are expanded to digit-by-digit pronunciation before speech synthesis (e.g. `MMSI 384435417` -> `MMSI 3 8 4 4 3 5 4 1 7`)
+- The formatting pipeline is extensible so additional pronunciation rules can be added without changing agent logic or skills
+- Pressing `Space` stops active speech playback first; if nothing is currently speaking, the same shortcut toggles voice input when focus is not in a text field
 
 Rust Edition and Compatibility
 
@@ -474,5 +489,4 @@ The original phases were reorganized during implementation:
 | 2 | DuckDB-WASM + polygon/radius draw tools + spatial queries + table view + render envelope | Complete |
 | 3 | Rust Axum backend + skill loader + server DuckDB + API endpoints + vite proxy | Complete |
 | 4 | Agent runtime + LLM integration + command bar wiring + frontend render pipeline | Complete |
-| 5 | Voice pipeline (Whisper + Piper) + ad hoc SQL safety + second skill extensibility proof | Not started |
-
+| 5 | Browser voice input + OpenAI TTS with browser fallback + ad hoc SQL safety + second skill extensibility proof | In progress |

@@ -4,7 +4,9 @@ mod db;
 mod llm;
 mod routes;
 mod skill;
+mod speech;
 mod state;
+mod tts;
 
 use axum::{routing::{get, post}, Router};
 use std::sync::Arc;
@@ -16,6 +18,7 @@ use crate::db::Database;
 use crate::llm::LlmClient;
 use crate::skill::load_skills;
 use crate::state::AppState;
+use crate::tts::OpenAiTtsClient;
 
 #[tokio::main]
 async fn main() {
@@ -56,8 +59,21 @@ async fn main() {
         tracing::warn!("No OPENAI_API_KEY set — agent will return errors. Set it in .env");
     }
 
+    let tts = config.openai_api_key.as_ref().map(|key| {
+        tracing::info!(
+            model = %config.openai_tts_model,
+            voice = %config.openai_tts_voice,
+            "OpenAI TTS enabled"
+        );
+        OpenAiTtsClient::new(
+            key.clone(),
+            config.openai_tts_model.clone(),
+            config.openai_tts_voice.clone(),
+        )
+    });
+
     // Build router
-    let state = AppState::new(config.clone(), db, skills, llm);
+    let state = AppState::new(config.clone(), db, skills, llm, tts);
 
     let app = Router::new()
         .route("/api/health", get(routes::health))
@@ -65,6 +81,7 @@ async fn main() {
         .route("/api/skills/{name}/layer-data", get(routes::skill_layer_data))
         .route("/api/query", post(routes::execute_query))
         .route("/api/agent", post(routes::agent_handler))
+        .route("/api/tts", post(routes::tts_handler))
         .layer(CorsLayer::permissive())
         .with_state(state);
 

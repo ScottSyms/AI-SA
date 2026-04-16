@@ -11,10 +11,7 @@
   } from '$lib/platform/selection/store';
   import {
     generateVessels,
-    generateTrack,
     vesselsToGeoJSON,
-    trackToGeoJSON,
-    trackPointsToGeoJSON,
   } from '$lib/data/synthetic-ais';
   import {
     initDuckDB,
@@ -59,23 +56,13 @@
     return expr as maplibregl.ExpressionSpecification;
   }
 
-  function updateTrack(mmsi: number | null) {
+  function clearTrack() {
     if (!map || !map.getSource('vessel-track')) return;
     const trackSource = map.getSource('vessel-track') as maplibregl.GeoJSONSource;
     const trackPointsSource = map.getSource('vessel-track-points') as maplibregl.GeoJSONSource;
 
-    if (!mmsi) {
-      trackSource.setData({ type: 'FeatureCollection', features: [] });
-      trackPointsSource.setData({ type: 'FeatureCollection', features: [] });
-      return;
-    }
-
-    const vessel = vesselsByMMSI.get(mmsi);
-    if (!vessel) return;
-
-    const track = generateTrack(vessel);
-    trackSource.setData(trackToGeoJSON(track) as GeoJSON.GeoJSON);
-    trackPointsSource.setData(trackPointsToGeoJSON(track));
+    trackSource.setData({ type: 'FeatureCollection', features: [] });
+    trackPointsSource.setData({ type: 'FeatureCollection', features: [] });
   }
 
   function updateHighlight(mmsis: number[]) {
@@ -455,15 +442,22 @@
         if (features && features.length > 0) {
           const props = features[0].properties;
           if (props) {
+            const mmsi = Number(props.mmsi);
+            const vessel = vesselsByMMSI.get(mmsi);
+            const selectionItem: SelectionItem = vessel
+              ? { ...vessel }
+              : {
+                  mmsi,
+                  name: String(props.name),
+                  lat: Number(props.lat),
+                  lon: Number(props.lon),
+                  speed: Number(props.speed),
+                  heading: Number(props.heading),
+                  vessel_type: String(props.vessel_type),
+                  timestamp: String(props.timestamp),
+                };
             selectVessel(
-              {
-                mmsi: props.mmsi,
-                name: props.name,
-                speed: props.speed,
-                heading: props.heading,
-                vessel_type: props.vessel_type,
-                timestamp: props.timestamp,
-              },
+              selectionItem,
               e.originalEvent.shiftKey
             );
           }
@@ -618,7 +612,7 @@
   const unsubSelection = selectionStore.subscribe((state) => {
     const mmsis = state.items.map((i) => i.mmsi);
     updateHighlight(mmsis);
-    updateTrack(state.primaryMMSI);
+    clearTrack();
   });
 
   // React to agent result geometry
@@ -676,9 +670,9 @@
 
 <style>
   .map-container {
-    position: absolute;
-    inset: 0;
+    position: relative;
     width: 100%;
     height: 100%;
+    min-height: 0;
   }
 </style>

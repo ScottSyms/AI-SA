@@ -38,6 +38,15 @@ pub struct AgentContext {
     /// Currently selected items
     #[serde(default)]
     pub selection: Vec<SelectionItem>,
+    /// Current selection mode
+    #[serde(default)]
+    pub selection_mode: Option<String>,
+    /// Primary selected MMSI, if any
+    #[serde(default)]
+    pub primary_mmsi: Option<i64>,
+    /// Recent conversation turns for current session
+    #[serde(default)]
+    pub conversation: Vec<ConversationTurn>,
     /// Map viewport bounds [min_lon, min_lat, max_lon, max_lat]
     #[serde(default)]
     pub viewport: Option<[f64; 4]>,
@@ -47,6 +56,13 @@ pub struct AgentContext {
 pub struct SelectionItem {
     pub mmsi: i64,
     pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ConversationTurn {
+    pub role: String,
+    pub text: String,
+    pub timestamp: String,
 }
 
 /// The render envelope returned to the frontend (AGENTS.md §4).
@@ -293,7 +309,8 @@ fn build_system_prompt(skills: &[SkillManifest], context: Option<&AgentContext>,
          - Use the provided tools to answer questions. Do NOT guess data.\n\
          - When querying data, always use LIMIT to bound results.\n\
          - Present results clearly with relevant details.\n\
-         - If the user asks about selected vessels, use the context provided.\n\
+         - If the user asks about this ship, these ships, the selected vessel, or similar references, resolve them against CURRENT SELECTION before doing anything else.\n\
+         - Use CURRENT CONVERSATION to keep follow-up answers consistent with the active session.\n\
          - Use nautical terminology where appropriate for maritime data.\n\
          - If you need to run a custom query, use the run_sql tool.\n\
          - NEVER call the same tool more than twice with the same intent. If a query fails, try a different approach or report what you know.\n\
@@ -354,8 +371,26 @@ fn build_system_prompt(skills: &[SkillManifest], context: Option<&AgentContext>,
     if let Some(ctx) = context {
         if !ctx.selection.is_empty() {
             prompt.push_str("CURRENT SELECTION:\n");
+            if let Some(mode) = &ctx.selection_mode {
+                prompt.push_str(&format!("  mode: {}\n", mode));
+            }
+            if let Some(primary_mmsi) = ctx.primary_mmsi {
+                prompt.push_str(&format!("  primary_mmsi: {}\n", primary_mmsi));
+            }
             for item in &ctx.selection {
                 prompt.push_str(&format!("  - {} (MMSI: {})\n", item.name, item.mmsi));
+            }
+            prompt.push('\n');
+        }
+        if !ctx.conversation.is_empty() {
+            prompt.push_str("CURRENT CONVERSATION:\n");
+            for turn in &ctx.conversation {
+                prompt.push_str(&format!(
+                    "  - [{}] {}: {}\n",
+                    turn.timestamp,
+                    turn.role.to_uppercase(),
+                    turn.text.replace('\n', " ")
+                ));
             }
             prompt.push('\n');
         }

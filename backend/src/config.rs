@@ -14,6 +14,10 @@ pub struct Config {
     pub bind_addr: String,
     /// OpenAI API key (optional for Phase 3)
     pub openai_api_key: Option<String>,
+    /// OpenAI TTS model name
+    pub openai_tts_model: String,
+    /// OpenAI TTS voice name
+    pub openai_tts_voice: String,
 }
 
 impl Config {
@@ -44,6 +48,10 @@ impl Config {
         let bind_addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:3001".to_string());
 
         let openai_api_key = std::env::var("OPENAI_API_KEY").ok();
+        let openai_tts_model =
+            std::env::var("OPENAI_TTS_MODEL").unwrap_or_else(|_| "gpt-4o-mini-tts".to_string());
+        let openai_tts_voice =
+            std::env::var("OPENAI_TTS_VOICE").unwrap_or_else(|_| "alloy".to_string());
 
         Config {
             project_root,
@@ -51,6 +59,8 @@ impl Config {
             data_dir,
             bind_addr,
             openai_api_key,
+            openai_tts_model,
+            openai_tts_voice,
         }
     }
 }

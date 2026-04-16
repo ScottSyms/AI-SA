@@ -1,6 +1,7 @@
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{header, HeaderValue, StatusCode},
+    response::Response,
     Json,
 };
 use serde::Deserialize;
@@ -9,6 +10,7 @@ use std::sync::Arc;
 
 use crate::agent::AgentRequest;
 use crate::db::validate_sql;
+use crate::speech::format_speech_text;
 use crate::state::AppState;
 
 // ── Health ──────────────────────────────────────────────────────────────────
@@ -176,6 +178,58 @@ pub async fn agent_handler(
             "error": format!("serialization error: {e}")
         })
     }))
+}
+
+// ── POST /api/tts ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct TtsRequest {
+    pub text: String,
+}
+
+pub async fn tts_handler(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<TtsRequest>,
+) -> Result<Response, (StatusCode, Json<Value>)> {
+    let tts = state.tts.as_ref().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({
+                "status": "error",
+                "error": "TTS unavailable — OPENAI_API_KEY not configured"
+            })),
+        )
+    })?;
+
+    let text = req.text.trim();
+    if text.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "error": "text is required" })),
+        ));
+    }
+
+    if text.len() > 4000 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "error": "text exceeds maximum length" })),
+        ));
+    }
+
+    let normalized = format_speech_text(text);
+    let audio = tts.synthesize(&normalized).await.map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "status": "error", "error": e })),
+        )
+    })?;
+
+    let mut response = Response::new(audio.into());
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("audio/mpeg"),
+    );
+    Ok(response)
 }
 
 // ── GET /api/skills/:name/layer-data ───────────────────────────────────────

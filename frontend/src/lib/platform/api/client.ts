@@ -33,6 +33,27 @@ export interface QueryResult {
   row_count: number;
 }
 
+export async function synthesizeSpeech(text: string): Promise<Blob> {
+  const res = await fetch(`${API_BASE}/tts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text })
+  });
+
+  if (!res.ok) {
+    let message = `tts failed: ${res.status}`;
+    try {
+      const data = await res.json();
+      message = data.error ?? message;
+    } catch {
+      // ignore non-json error body
+    }
+    throw new Error(message);
+  }
+
+  return await res.blob();
+}
+
 /** Check if the backend is reachable. */
 export async function checkHealth(): Promise<BackendHealth | null> {
   try {
@@ -83,7 +104,12 @@ export async function queryTool(
 /** Send a message to the agent endpoint. Returns the full RenderEnvelope. */
 export async function sendAgentMessage(
   message: string,
-  context?: Record<string, unknown>
+  context?: {
+    selection?: Array<{ mmsi: number; name: string }>;
+    selection_mode?: 'single' | 'multi';
+    primary_mmsi?: number | null;
+    conversation?: Array<{ role: 'user' | 'assistant'; text: string; timestamp: string }>;
+  }
 ): Promise<AgentRenderEnvelope> {
   const res = await fetch(`${API_BASE}/agent`, {
     method: 'POST',

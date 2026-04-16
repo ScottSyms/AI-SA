@@ -167,6 +167,8 @@ export function vesselsToGeoJSON(vessels: Vessel[]): GeoJSON.FeatureCollection {
       properties: {
         mmsi: v.mmsi,
         name: v.name,
+        lat: v.lat,
+        lon: v.lon,
         speed: v.speed,
         heading: v.heading,
         vessel_type: v.vessel_type,
