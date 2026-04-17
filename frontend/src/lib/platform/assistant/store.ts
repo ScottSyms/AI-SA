@@ -38,6 +38,7 @@ let initialized = false;
 let healthCheckStarted = false;
 let activeAudio: HTMLAudioElement | null = null;
 let activeAudioUrl: string | null = null;
+let speechGeneration = 0;
 
 function buildAgentContext() {
   const selection = get(selectionStore);
@@ -88,6 +89,7 @@ function speakWithBrowserFallback(text: string) {
 async function speak(text: string) {
   if (!browser || !get(ttsEnabledStore)) return;
 
+  const generation = ++speechGeneration;
   const clean = normalizeSpeechText(text);
   stopActiveAudio();
   if ('speechSynthesis' in window) {
@@ -96,19 +98,35 @@ async function speak(text: string) {
 
   try {
     const audioBlob = await synthesizeSpeech(clean);
+    if (generation !== speechGeneration || !get(ttsEnabledStore)) {
+      return;
+    }
+
     const objectUrl = URL.createObjectURL(audioBlob);
     const audio = new Audio(objectUrl);
     activeAudio = audio;
     activeAudioUrl = objectUrl;
     audio.onended = () => {
+      if (generation !== speechGeneration) return;
       stopActiveAudio();
     };
     audio.onerror = () => {
+      if (generation !== speechGeneration) {
+        stopActiveAudio();
+        return;
+      }
       stopActiveAudio();
       speakWithBrowserFallback(clean);
     };
+    if (generation !== speechGeneration || !get(ttsEnabledStore)) {
+      stopActiveAudio();
+      return;
+    }
     await audio.play();
   } catch (error) {
+    if (generation !== speechGeneration || !get(ttsEnabledStore)) {
+      return;
+    }
     console.warn('Backend TTS failed, using browser fallback:', error);
     speakWithBrowserFallback(clean);
   }
@@ -208,6 +226,7 @@ export function toggleTts() {
 }
 
 export function stopSpeechPlayback(): boolean {
+  speechGeneration += 1;
   let stopped = false;
 
   if (activeAudio) {
