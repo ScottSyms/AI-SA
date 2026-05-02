@@ -2,67 +2,221 @@
 //!
 //! Usage: cargo run --bin seed-data
 //!
-//! Produces data/seed/ais_sample.parquet with ~200 vessels, each with ~50 track points.
+//! Produces data/seed/ais_sample.parquet with ~1000 vessels, each with ~50 track points spanning 90 days.
 
 use duckdb::Connection;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 
-const VESSEL_COUNT: usize = 200;
+const VESSEL_COUNT: usize = 1000;
 const TRACK_POINTS: usize = 50;
+const TRACK_SPAN_DAYS: i64 = 90;
 
-const VESSEL_NAMES: &[&str] = &[
-    "Atlantic Pioneer",
-    "Pacific Voyager",
-    "Northern Star",
-    "Southern Cross",
-    "Sea Wanderer",
-    "Ocean Titan",
-    "Coral Venture",
-    "Arctic Explorer",
-    "Storm Chaser",
-    "Blue Horizon",
-    "Golden Eagle",
-    "Silver Wave",
-    "Red Falcon",
-    "Iron Maiden",
-    "Crystal Bay",
-    "Thunder Bay",
-    "Wind Spirit",
-    "Polar Bear",
-    "Sun Dancer",
-    "Moon Shadow",
-    "Neptune's Pride",
-    "Emerald Isle",
-    "Diamond Star",
-    "Ruby Queen",
-    "Sapphire Dream",
-    "Pearl Harbor",
-    "Jade Emperor",
-    "Amber Dawn",
-    "Crimson Tide",
-    "Azure Sky",
-    "Ivory Coast",
-    "Ebony Night",
-    "Topaz Sun",
-    "Opal Moon",
-    "Garnet Fire",
-    "Onyx Shadow",
-    "Turquoise Wave",
-    "Coral Reef",
-    "Lotus Flower",
-    "Dragon Wing",
-    "Phoenix Rise",
-    "Falcon Crest",
-    "Eagle Eye",
-    "Hawk Wind",
-    "Osprey Flight",
-    "Heron Bay",
-    "Pelican Point",
-    "Albatross Wing",
-    "Marlin Strike",
-    "Swordfish Run",
+const CARGO_NAMES: &[&str] = &[
+    "Emma Maersk",
+    "Ever Given",
+    "MSC Gulsun",
+    "Madrid Maersk",
+    "CMA CGM Benjamin Franklin",
+    "OOCL Hong Kong",
+    "HMM Algeciras",
+    "MOL Triumph",
+    "CMA CGM Jacques Saade",
+    "COSCO Shipping Nebula",
+    "Ever Ace",
+    "Ever Alot",
+    "Ever Act",
+    "Ever Forward",
+    "MSC Oscar",
+    "Maersk Eindhoven",
+    "Maersk Essen",
+    "Hapag-Lloyd Berlin",
+    "ONE Integrity",
+    "Hyundai Neptune",
+    "Seaspan Bravo",
+    "APL Atlanta",
+    "CMA CGM Marco Polo",
+    "OOCL Europe",
+    "Ever Gifted",
+];
+
+const TANKER_NAMES: &[&str] = &[
+    "TI Europe",
+    "TI Asia",
+    "Seawise Giant",
+    "Front Altair",
+    "Front Eagle",
+    "Nave Andromeda",
+    "Nave Ariadne",
+    "DHT Tiger",
+    "DHT Lion",
+    "Almi Tankers",
+    "Berge Everest",
+    "Suezmax Trader",
+    "Nordic Mistral",
+    "Baltic Horizon",
+    "Oceanic Pride",
+    "Polar Endeavour",
+    "Aframax Star",
+    "Crested Falcon",
+    "Ridgeway Spirit",
+    "Meridian Voyager",
+];
+
+const FISHING_NAMES: &[&str] = &[
+    "FV Cornelis Vrolijk",
+    "FV Annelies Ilena",
+    "FV Margiris",
+    "FV Saga",
+    "FV Atlantic Dawn",
+    "FV Peterhead",
+    "FV Westbank",
+    "FV Ocean Harvest",
+    "FV North Star",
+    "FV Silver Dawn",
+    "FV Sea Breeze",
+    "FV Northern Quest",
+    "FV Arctic Hunter",
+    "FV Sapphire Tide",
+    "FV Pacific Pride",
+    "FV Blue Marlin",
+    "FV Golden Sheaf",
+    "FV Sea Hunter",
+    "FV Harbour Light",
+    "FV Ocean Venture",
+];
+
+const PASSENGER_NAMES: &[&str] = &[
+    "Queen Mary 2",
+    "Britannia",
+    "Rotterdam",
+    "AIDAcosma",
+    "MSC World Europa",
+    "Wonder of the Seas",
+    "Icon of the Seas",
+    "MS Europa",
+    "MS Eurodam",
+    "Costa Smeralda",
+    "Carnival Vista",
+    "Norwegian Encore",
+    "Disney Dream",
+    "Celebrity Edge",
+    "Viking Venus",
+    "Oasis of the Seas",
+    "Quantum of the Seas",
+    "Iona",
+    "P&O Arvia",
+    "Aurora",
+];
+
+const TUG_NAMES: &[&str] = &[
+    "Svitzer Muir",
+    "Svitzer Meridian",
+    "Svitzer Ingrid",
+    "Fairplay XI",
+    "Fairplay 35",
+    "Multratug 18",
+    "Multratug 19",
+    "Bourbon Orca",
+    "Moran Explorer",
+    "Viking Neptune",
+    "Harbor Master",
+    "Port Assist",
+    "Dock Pilot",
+    "Bay Tug",
+    "Harbor Spirit",
+];
+
+const SAILING_NAMES: &[&str] = &[
+    "Amerigo Vespucci",
+    "Kruzenshtern",
+    "Sedov",
+    "Statsraad Lehmkuhl",
+    "Sea Cloud",
+    "Sea Cloud II",
+    "Maltese Falcon",
+    "Jadran",
+    "Etoile du Roy",
+    "Christian Radich",
+    "Europa",
+    "Royal Albatross",
+    "Spirit of Bermuda",
+    "Atyla",
+    "Bluenose II",
+];
+
+const PLEASURE_NAMES: &[&str] = &[
+    "A",
+    "Eclipse",
+    "Dilbar",
+    "Azzam",
+    "Rising Sun",
+    "Koru",
+    "Serene",
+    "Octopus",
+    "Lady Moura",
+    "Flying Fox",
+    "Nero",
+    "Vava II",
+    "Al Said",
+    "Black Pearl",
+    "Sailing Yacht A",
+];
+
+const MILITARY_NAMES: &[&str] = &[
+    "USS Gerald R. Ford",
+    "USS Zumwalt",
+    "USS Arleigh Burke",
+    "HMS Queen Elizabeth",
+    "HMS Daring",
+    "INS Vikrant",
+    "JS Izumo",
+    "FS Charles de Gaulle",
+    "USS Nimitz",
+    "HMS Prince of Wales",
+    "INS Kolkata",
+    "JS Kaga",
+    "USS Monterey",
+    "HMS Dragon",
+    "FS Forbin",
+];
+
+const RESEARCH_NAMES: &[&str] = &[
+    "RV Falkor",
+    "RV Atlantis",
+    "RV Polarstern",
+    "RRS Sir David Attenborough",
+    "NOAA Ship Okeanos Explorer",
+    "RV Tara",
+    "RV Neil Armstrong",
+    "RV Investigator",
+    "RV Metops",
+    "RV Sonne",
+    "RV Sikuliaq",
+    "RV Maria S. Merian",
+    "RV Revelle",
+    "RV Pelagia",
+    "RV Calypso",
+];
+
+const PILOT_NAMES: &[&str] = &[
+    "Pilot 1",
+    "Pilot 2",
+    "Pilot 3",
+    "Pilot 4",
+    "Pilot 5",
+    "Pilot 6",
+    "Pilot 7",
+    "Pilot 8",
+    "Pilot 9",
+    "Pilot 10",
+    "Port Pilot",
+    "Harbor Pilot",
+    "Sea Pilot",
+    "Dock Pilot",
+    "Channel Pilot",
 ];
 
 const VESSEL_TYPES: &[&str] = &[
@@ -143,16 +297,33 @@ fn pick_region(rng: &mut StdRng) -> &'static Region {
     &REGIONS[0]
 }
 
-fn main() {
-    // Resolve output path
-    let cwd = std::env::current_dir().unwrap();
-    let project_root = if cwd.join("data").is_dir() {
-        cwd.clone()
-    } else if cwd.join("../data").is_dir() {
-        cwd.join("..")
+fn vessel_names(vessel_type: &str) -> &'static [&'static str] {
+    match vessel_type {
+        "Cargo" => CARGO_NAMES,
+        "Tanker" => TANKER_NAMES,
+        "Fishing" => FISHING_NAMES,
+        "Passenger" => PASSENGER_NAMES,
+        "Tug" => TUG_NAMES,
+        "Sailing" => SAILING_NAMES,
+        "Pleasure" => PLEASURE_NAMES,
+        "Military" => MILITARY_NAMES,
+        "Research" => RESEARCH_NAMES,
+        "Pilot" => PILOT_NAMES,
+        _ => CARGO_NAMES,
+    }
+}
+
+fn pick_vessel_name(vessel_type: &str, index: usize, mmsi: i64) -> String {
+    let names = vessel_names(vessel_type);
+    if index < names.len() {
+        names[index].to_string()
     } else {
-        cwd.clone()
-    };
+        format!("{} {}", vessel_type, mmsi % 1000)
+    }
+}
+
+fn main() {
+    let project_root = resolve_project_root();
 
     let seed_dir = project_root.join("data").join("seed");
     fs::create_dir_all(&seed_dir).expect("failed to create data/seed/");
@@ -180,24 +351,22 @@ fn main() {
     .expect("failed to create table");
 
     let mut rng = StdRng::seed_from_u64(42);
-    let mut used_mmsi = std::collections::HashSet::new();
+    let mut used_mmsi = HashSet::new();
+    let mut vessel_name_counts: HashMap<&'static str, usize> = HashMap::new();
 
-    let base_time = 1700000000i64; // ~Nov 2023 epoch seconds
+    let end_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time before UNIX_EPOCH")
+        .as_secs() as i64;
 
     let mut insert_count = 0u64;
 
-    for i in 0..VESSEL_COUNT {
+    for _ in 0..VESSEL_COUNT {
         let mmsi: i64 = loop {
             let candidate = 200_000_000 + rng.gen_range(0..600_000_000i64);
             if used_mmsi.insert(candidate) {
                 break candidate;
             }
-        };
-
-        let name = if i < VESSEL_NAMES.len() {
-            VESSEL_NAMES[i].to_string()
-        } else {
-            format!("Vessel-{}", mmsi)
         };
 
         let region = pick_region(&mut rng);
@@ -206,9 +375,16 @@ fn main() {
         let base_speed: f64 = rng.gen_range(0.0..22.0);
         let base_heading: f64 = rng.gen_range(0.0..360.0);
         let vessel_type = VESSEL_TYPES[rng.gen_range(0..VESSEL_TYPES.len())];
+        let name_index = vessel_name_counts.entry(vessel_type).or_insert(0);
+        let name = pick_vessel_name(vessel_type, *name_index, mmsi);
+        *name_index += 1;
 
         let mut lat = base_lat;
         let mut lon = base_lon;
+
+        let start_time = end_time - TRACK_SPAN_DAYS * 24 * 60 * 60;
+
+        let track_denominator = (TRACK_POINTS.saturating_sub(1)) as i64;
 
         for j in 0..TRACK_POINTS {
             let heading = base_heading + rng.gen_range(-15.0..15.0);
@@ -216,7 +392,11 @@ fn main() {
             let heading_int = ((heading % 360.0 + 360.0) % 360.0) as i32;
             let speed_rounded = (speed * 10.0).round() / 10.0;
 
-            let ts_epoch = base_time - ((TRACK_POINTS - 1 - j) as i64) * 600;
+            let ts_epoch = if track_denominator == 0 {
+                start_time
+            } else {
+                start_time + ((TRACK_SPAN_DAYS * 24 * 60 * 60) * j as i64) / track_denominator
+            };
             // Format as ISO timestamp string for DuckDB
             let ts_str = format!("TIMESTAMP '{}'", chrono_from_epoch(ts_epoch));
 
@@ -309,4 +489,19 @@ fn chrono_from_epoch(epoch_secs: i64) -> String {
 
 fn is_leap(year: i32) -> bool {
     (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+}
+
+fn resolve_project_root() -> std::path::PathBuf {
+    if let Ok(root) = std::env::var("PROJECT_ROOT") {
+        return std::path::PathBuf::from(root);
+    }
+
+    let cwd = std::env::current_dir().unwrap();
+    if cwd.join("skills").is_dir() {
+        cwd
+    } else if cwd.join("../skills").is_dir() {
+        cwd.join("..").canonicalize().unwrap_or_else(|_| cwd.join(".."))
+    } else {
+        cwd
+    }
 }

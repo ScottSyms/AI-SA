@@ -676,14 +676,7 @@ const PORTS: &[Port] = &[
 ];
 
 fn main() {
-    let cwd = std::env::current_dir().unwrap();
-    let project_root = if cwd.join("data").is_dir() {
-        cwd.clone()
-    } else if cwd.join("../data").is_dir() {
-        cwd.join("..")
-    } else {
-        cwd.clone()
-    };
+    let project_root = resolve_project_root();
 
     let seed_dir = project_root.join("data").join("seed");
     fs::create_dir_all(&seed_dir).expect("failed to create data/seed/");
@@ -740,4 +733,19 @@ fn main() {
     let mut stmt = conn.prepare(&verify_sql).unwrap();
     let count: i64 = stmt.query_row([], |row| row.get(0)).unwrap();
     println!("Verification: {} rows in parquet file", count);
+}
+
+fn resolve_project_root() -> std::path::PathBuf {
+    if let Ok(root) = std::env::var("PROJECT_ROOT") {
+        return std::path::PathBuf::from(root);
+    }
+
+    let cwd = std::env::current_dir().unwrap();
+    if cwd.join("skills").is_dir() {
+        cwd
+    } else if cwd.join("../skills").is_dir() {
+        cwd.join("..").canonicalize().unwrap_or_else(|_| cwd.join(".."))
+    } else {
+        cwd
+    }
 }

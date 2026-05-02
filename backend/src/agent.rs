@@ -149,6 +149,13 @@ impl Agent {
         skills: &[SkillManifest],
         db: &Database,
     ) -> RenderEnvelope {
+        if let Some(envelope) = self
+            .maybe_resolve_selected_vessel(req, skills, db)
+            .await
+        {
+            return envelope;
+        }
+
         // Build dynamic schema description from DuckDB metadata
         let db_schema = db.describe_schema();
 
@@ -309,8 +316,10 @@ fn build_system_prompt(skills: &[SkillManifest], context: Option<&AgentContext>,
          - Use the provided tools to answer questions. Do NOT guess data.\n\
          - When querying data, always use LIMIT to bound results.\n\
          - Present results clearly with relevant details.\n\
-         - If the user asks about this ship, these ships, the selected vessel, or similar references, resolve them against CURRENT SELECTION before doing anything else.\n\
-         - Use CURRENT CONVERSATION to keep follow-up answers consistent with the active session.\n\
+          - If the user asks about this ship, this vessel, the selected vessel, or similar references, resolve them against CURRENT SELECTION before doing anything else.\n\
+          - For direct selected-vessel questions, use the AIS vessel details tool first. Do not answer from general knowledge if the selected vessel exists.\n\
+          - If a selected-vessel lookup returns no rows, say that no vessel details are available for the selected MMSI. Do not broaden the answer to a generic vessel category.\n\
+          - Use CURRENT CONVERSATION to keep follow-up answers consistent with the active session.\n\
          - Use nautical terminology where appropriate for maritime data.\n\
          - If you need to run a custom query, use the run_sql tool.\n\
          - NEVER call the same tool more than twice with the same intent. If a query fails, try a different approach or report what you know.\n\
@@ -403,6 +412,87 @@ fn build_system_prompt(skills: &[SkillManifest], context: Option<&AgentContext>,
     }
 
     prompt
+}
+
+impl Agent {
+    async fn maybe_resolve_selected_vessel(
+        &self,
+        req: &AgentRequest,
+        skills: &[SkillManifest],
+        db: &Database,
+    ) -> Option<RenderEnvelope> {
+        let ctx = req.context.as_ref()?;
+        let primary_mmsi = ctx.primary_mmsi.or_else(|| ctx.selection.first().map(|item| item.mmsi))?;
+
+        if !references_selected_vessel(&req.message) {
+            return None;
+        }
+
+        let skill = skills.iter().find(|skill| skill.name == "ais_positions")?;
+        let tool = skill.tools.iter().find(|tool| tool.name == "get_vessel_info")?;
+        let sql_filename = tool.sql_file.as_ref()?;
+        let sql_key = sql_filename.trim_end_matches(".sql");
+        let sql_template = skill.sql_files.get(sql_key)?;
+
+        let mut params = serde_json::Map::new();
+        params.insert("mmsi".into(), json!(primary_mmsi));
+
+        let result = match db.query_with_params(sql_template, &params) {
+            Ok(value) => value,
+            Err(err) => {
+                return Some(RenderEnvelope::error(&format!(
+                    "Failed to retrieve vessel details for MMSI {}: {}",
+                    primary_mmsi, err
+                )));
+            }
+        };
+
+        let columns = result
+            .get("columns")
+            .and_then(|v| v.as_array())
+            .map(|cols| {
+                cols.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let rows = result.get("rows").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let first = rows.first()?;
+        let name = first.get("name").and_then(|v| v.as_str()).unwrap_or("Selected vessel");
+        let vessel_type = first.get("vessel_type").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let position_count = first.get("position_count").and_then(|v| v.as_i64()).unwrap_or(0);
+        let summary = format!(
+            "{} (MMSI {}) is a {} vessel with {} position records.",
+            name, primary_mmsi, vessel_type, position_count
+        );
+
+        let mut envelope = RenderEnvelope::text("Vessel Details", &summary);
+        envelope = envelope.with_table(columns, json!(rows));
+        Some(envelope)
+    }
+}
+
+fn references_selected_vessel(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    [
+        "this ship",
+        "this vessel",
+        "selected vessel",
+        "selected ship",
+        "about it",
+        "details about it",
+        "details on it",
+        "information about it",
+        "information regarding it",
+        "regarding it",
+        "what is it",
+        "what is this ship",
+        "what is this vessel",
+        "tell me about it",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 // ── Tool definition builder ────────────────────────────────────────────────

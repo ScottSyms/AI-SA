@@ -111,12 +111,7 @@ async function speak(text: string) {
       stopActiveAudio();
     };
     audio.onerror = () => {
-      if (generation !== speechGeneration) {
-        stopActiveAudio();
-        return;
-      }
       stopActiveAudio();
-      speakWithBrowserFallback(clean);
     };
     if (generation !== speechGeneration || !get(ttsEnabledStore)) {
       stopActiveAudio();
@@ -124,10 +119,8 @@ async function speak(text: string) {
     }
     await audio.play();
   } catch (error) {
-    if (generation !== speechGeneration || !get(ttsEnabledStore)) {
-      return;
-    }
-    console.warn('Backend TTS failed, using browser fallback:', error);
+    if (generation !== speechGeneration || !get(ttsEnabledStore)) return;
+    console.warn('Backend TTS failed:', error);
     speakWithBrowserFallback(clean);
   }
 }
