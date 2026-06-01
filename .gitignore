@@ -8,3 +8,6 @@ dist/
 frontend/node_modules/
 frontend/.svelte-kit/
 backend/target/
+.devenv/
+devenv.nix
+devenv.lock

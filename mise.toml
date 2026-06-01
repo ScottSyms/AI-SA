@@ -1,0 +1,13 @@
+[env]
+GREET = "from mise"
+
+[tools]
+duckdb = "latest"
+rclone = "latest"
+node = "latest"
+pnpm = "latest"
+rust = "latest"
+
+[tasks.hello]
+run = "echo 'This is the COP tool'"
+description = "Print the COP tool greeting"
