@@ -85,10 +85,28 @@ async fn main() {
         .layer(CorsLayer::permissive())
         .with_state(state);
 
-    // Serve
-    let listener = tokio::net::TcpListener::bind(&config.bind_addr)
-        .await
-        .expect("failed to bind");
+    // Bind with SO_REUSEADDR to avoid "Address already in use" on restart
+    let addr: std::net::SocketAddr = config
+        .bind_addr
+        .parse()
+        .expect("invalid bind address");
+    let socket = socket2::Socket::new(
+        socket2::Domain::for_address(addr),
+        socket2::Type::STREAM,
+        Some(socket2::Protocol::TCP),
+    )
+    .expect("failed to create socket");
+    socket.set_reuse_address(true).expect("failed to set SO_REUSEADDR");
+    socket.bind(&addr.into()).unwrap_or_else(|e| {
+        panic!("failed to bind to {addr}: {e}");
+    });
+    socket.listen(1024).expect("failed to listen");
+    let std_listener: std::net::TcpListener = socket.into();
+    std_listener
+        .set_nonblocking(true)
+        .expect("failed to set nonblocking");
+    let listener = tokio::net::TcpListener::from_std(std_listener)
+        .expect("failed to create tokio listener");
     tracing::info!(addr = %config.bind_addr, "backend listening");
     axum::serve(listener, app).await.unwrap();
 }

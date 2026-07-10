@@ -7,6 +7,7 @@ rclone = "latest"
 node = "latest"
 pnpm = "latest"
 rust = "latest"
+python = "latest"
 
 [tasks.hello]
 run = "echo 'This is the COP tool'"

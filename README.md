@@ -1,6 +1,8 @@
 # Tommy3
 
-Skill-driven geospatial intelligence platform built on MapLibre GL JS, DuckDB, and an LLM-powered agent runtime.
+![screenshot](screenshot.png)
+
+Part of a series of gui's exploring skill-driven geospatial intelligence platform built on MapLibre GL JS, DuckDB, and an LLM-powered agent runtime.
 
 Tommy3 is a **platform, not an application**. The platform owns rendering, interaction, agent orchestration, and tool execution. **Skills** are drop-in domain modules that provide data sources, SQL logic, tool contracts, and map layer definitions — no platform code changes required.
 
