@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import maplibregl from 'maplibre-gl';
+  import { Protocol } from 'pmtiles';
+  import { layers as basemapLayers, namedFlavor } from '@protomaps/basemaps';
   import { mapStore } from '$lib/platform/map/store';
   import { drawModeStore, setDrawMode } from '$lib/platform/map/draw-mode';
   import {
@@ -24,6 +26,16 @@
 
   let mapContainer: HTMLDivElement;
   let map: maplibregl.Map;
+
+  // --- Foundation map (local PMTiles basemap) ---
+  // The planet basemap is served as a raw PMTiles archive by rustfs on :9000.
+  // MapLibre reads it directly over HTTP range requests via the pmtiles:// protocol.
+  const PMTILES_PROTOCOL = 'pmtiles';
+  const PMTILES_URL = 'pmtiles://http://localhost:9000/maps/planet.pmtiles';
+  const BASEMAP_SOURCE_ID = 'protomaps';
+  // Fonts + sprites are static assets required by label/POI symbol layers.
+  const BASEMAP_ASSETS_URL = 'https://protomaps.github.io/basemaps-assets';
+
   const vessels = generateVessels(200);
   const vesselsByMMSI = new Map<number, Vessel>();
   vessels.forEach((v) => vesselsByMMSI.set(v.mmsi, v));
@@ -226,29 +238,26 @@
   }
 
   onMount(() => {
+    // Register the PMTiles protocol so MapLibre can load the local archive.
+    const protocol = new Protocol();
+    maplibregl.addProtocol(PMTILES_PROTOCOL, protocol.tile);
+
     map = new maplibregl.Map({
       container: mapContainer,
       style: {
         version: 8,
-        name: 'Geospatial Platform',
+        name: 'Protomaps Basemap (local PMTiles)',
+        glyphs: `${BASEMAP_ASSETS_URL}/fonts/{fontstack}/{range}.pbf`,
+        sprite: `${BASEMAP_ASSETS_URL}/sprites/v4/light`,
         sources: {
-          'osm-tiles': {
-            type: 'raster',
-            tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-            tileSize: 256,
+          [BASEMAP_SOURCE_ID]: {
+            type: 'vector',
+            url: PMTILES_URL,
             attribution:
               '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
           },
         },
-        layers: [
-          {
-            id: 'osm-base',
-            type: 'raster',
-            source: 'osm-tiles',
-            minzoom: 0,
-            maxzoom: 19,
-          },
-        ],
+        layers: basemapLayers(BASEMAP_SOURCE_ID, namedFlavor('light'), { lang: 'en' }),
       },
       center: [2.0, 50.0],
       zoom: 5,
@@ -661,6 +670,7 @@
       mapStore.set(null);
       map.remove();
     }
+    maplibregl.removeProtocol(PMTILES_PROTOCOL);
   });
 </script>
 
